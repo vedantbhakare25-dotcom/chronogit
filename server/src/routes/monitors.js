@@ -4,7 +4,8 @@ import mongoose from 'mongoose';
 import Monitor from '../models/Monitor.js';
 import CheckLog from '../models/CheckLog.js';
 import { fetchJson } from '../services/fetcher.js';
-import { extractSchema } from '../services/schema/index.js';
+import { extractSchema, diffSchemas } from '../services/schema/index.js';
+import { runCheck } from '../services/checkRunner.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { badRequest, notFound } from '../utils/AppError.js';
 import { parseCreateMonitorInput, parseUpdateMonitorInput, parsePagination } from '../utils/validators.js';
@@ -62,7 +63,10 @@ router.get(
       .select('-baselineSchema -latestSchema')
       .sort({ createdAt: -1 })
       .lean();
-    res.json(monitors.map((m) => ({ ...m, headers: m.headers ? Object.fromEntries(m.headers) : {} })));
+    // .lean() returns plain objects straight from the driver, so a Map field
+    // (headers) is already a plain { key: value } object here, NOT a Map
+    // instance — Object.fromEntries() would throw on that (not iterable).
+    res.json(monitors.map((m) => ({ ...m, headers: m.headers ?? {} })));
   })
 );
 
@@ -103,6 +107,46 @@ router.delete(
     const monitor = await loadMonitor(req.params.id);
     await Promise.all([CheckLog.deleteMany({ monitorId: monitor._id }), monitor.deleteOne()]);
     res.status(204).send();
+  })
+);
+
+/**
+ * POST /api/monitors/:id/check
+ * Runs a check immediately instead of waiting for the scheduler (Phase 4).
+ * Useful for demos and for confirming a monitor is set up correctly.
+ */
+router.post(
+  '/:id/check',
+  asyncHandler(async (req, res) => {
+    const monitor = await loadMonitor(req.params.id);
+    const { checkLog, outcome } = await runCheck(monitor);
+    res.json({ monitor: monitor.toClientJSON(), checkLog, outcome });
+  })
+);
+
+/**
+ * POST /api/monitors/:id/accept
+ * Promotes the current latestSchema to be the new baseline — the user
+ * looked at the diff and decided the change (renamed field, new key,
+ * whatever) is intentional. Clears the breaking status and fingerprint.
+ */
+router.post(
+  '/:id/accept',
+  asyncHandler(async (req, res) => {
+    const monitor = await loadMonitor(req.params.id);
+    const pending = diffSchemas(monitor.baselineSchema, monitor.latestSchema, {
+      ignorePaths: monitor.ignorePaths,
+    });
+    if (pending.length === 0) {
+      throw badRequest('Nothing to accept — the baseline already matches the latest schema');
+    }
+
+    monitor.baselineSchema = monitor.latestSchema;
+    monitor.lastBreakingFingerprint = null;
+    monitor.status = 'HEALTHY';
+    await monitor.save();
+
+    res.json(monitor.toClientJSON());
   })
 );
 
