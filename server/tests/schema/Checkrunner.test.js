@@ -7,15 +7,23 @@ vi.mock('../../src/services/fetcher.js', async (importOriginal) => {
 vi.mock('../../src/models/CheckLog.js', () => ({
   default: { create: vi.fn(async (doc) => ({ _id: 'log-' + Math.random().toString(36).slice(2), ...doc })) },
 }));
+// Mocked only at the actual I/O boundary — decideAlertKind, dispatchAlert,
+// and the email templates all run for real, so these tests prove the
+// wiring, not just that some mock was called.
+vi.mock('../../src/services/alerts/emailDispatcher.js', () => ({
+  sendAlertEmail: vi.fn().mockResolvedValue({ sent: true }),
+}));
 
 import { fetchJson, FetchError } from '../../src/services/fetcher.js';
 import CheckLog from '../../src/models/CheckLog.js';
+import { sendAlertEmail } from '../../src/services/alerts/emailDispatcher.js';
 import { runCheck, computeBreakingFingerprint } from '../../src/services/checkRunner.js';
 
 /** A fake Monitor document — a plain object with the fields runCheck reads/writes, plus a spy-able save(). */
 function makeMonitor(overrides = {}) {
   return {
     _id: 'monitor-1',
+    name: 'Weather API',
     url: 'https://api.example.com/weather',
     headers: new Map(),
     ignorePaths: [],
@@ -32,6 +40,7 @@ function makeMonitor(overrides = {}) {
     lastBreakingFingerprint: null,
     lastCheckedAt: null,
     nextCheckAt: null,
+    alerts: { email: 'ops@example.com', notifyOnRecovery: true },
     save: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -264,5 +273,116 @@ describe('computeBreakingFingerprint', () => {
       { path: '$.a', kind: 'TYPE_CHANGED', from: ['number'], to: ['boolean'], breaking: true },
     ]);
     expect(fp1).not.toBe(fp2);
+  });
+});
+
+describe('runCheck: alert integration (real decision logic + templates, mocked email transport)', () => {
+  it('sends an initial breaking alert on HEALTHY -> BREAKING', async () => {
+    fetchJson.mockResolvedValue({ json: { temp: '32' }, status: 200 }); // number -> string
+    const monitor = makeMonitor();
+
+    const { checkLog } = await runCheck(monitor);
+
+    expect(sendAlertEmail).toHaveBeenCalledTimes(1);
+    expect(sendAlertEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: 'ops@example.com',
+        subject: expect.stringContaining('Breaking Schema Drift Detected'),
+      })
+    );
+    expect(checkLog.alertSent).toBe('BREAKING');
+  });
+
+  it('does not alert on a normal OK check', async () => {
+    fetchJson.mockResolvedValue({ json: { temp: 40 }, status: 200 });
+    const { checkLog } = await runCheck(makeMonitor());
+
+    expect(sendAlertEmail).not.toHaveBeenCalled();
+    expect(checkLog.alertSent).toBeUndefined();
+  });
+
+  it('does not alert on NON_BREAKING drift', async () => {
+    fetchJson.mockResolvedValue({ json: { temp: 40, humidity: 60 }, status: 200 });
+    const { checkLog } = await runCheck(makeMonitor());
+
+    expect(sendAlertEmail).not.toHaveBeenCalled();
+    expect(checkLog.alertSent).toBeUndefined();
+  });
+
+  it('never alerts on a fetch/ERROR outcome', async () => {
+    fetchJson.mockRejectedValue(new FetchError('TIMEOUT', 'No response within 10000ms'));
+    const { checkLog } = await runCheck(makeMonitor());
+
+    expect(sendAlertEmail).not.toHaveBeenCalled();
+    expect(checkLog.alertSent).toBeUndefined();
+  });
+
+  it('stays silent on a repeated check with the identical break', async () => {
+    fetchJson.mockResolvedValue({ json: { temp: '32' }, status: 200 });
+    const monitor = makeMonitor();
+
+    await runCheck(monitor); // initial break — 1 email
+    await runCheck(monitor); // same break again — should NOT alert again
+
+    expect(sendAlertEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends a follow-up alert when new damage appears on top of an existing break', async () => {
+    fetchJson.mockResolvedValue({ json: { temp: '32' }, status: 200 });
+    const monitor = makeMonitor();
+    await runCheck(monitor); // initial break
+
+    fetchJson.mockResolvedValue({ json: {} }); // temp now also missing entirely: new damage
+    const { checkLog } = await runCheck(monitor);
+
+    expect(sendAlertEmail).toHaveBeenCalledTimes(2);
+    expect(sendAlertEmail).toHaveBeenLastCalledWith(
+      expect.objectContaining({ subject: expect.stringContaining('New Breaking Changes Detected') })
+    );
+    expect(checkLog.alertSent).toBe('BREAKING');
+  });
+
+  it('sends a recovery alert once the endpoint matches baseline again', async () => {
+    fetchJson.mockResolvedValue({ json: { temp: '32' }, status: 200 });
+    const monitor = makeMonitor();
+    await runCheck(monitor); // break
+
+    fetchJson.mockResolvedValue({ json: { temp: 32 }, status: 200 }); // back to normal
+    const { checkLog } = await runCheck(monitor);
+
+    expect(sendAlertEmail).toHaveBeenCalledTimes(2);
+    expect(sendAlertEmail).toHaveBeenLastCalledWith(
+      expect.objectContaining({ to: 'ops@example.com', subject: expect.stringContaining('API Recovered') })
+    );
+    expect(checkLog.alertSent).toBe('RECOVERY');
+  });
+
+  it('does not send a recovery alert when notifyOnRecovery is false', async () => {
+    fetchJson.mockResolvedValue({ json: { temp: '32' }, status: 200 });
+    const monitor = makeMonitor({ alerts: { email: 'ops@example.com', notifyOnRecovery: false } });
+    await runCheck(monitor); // break (still alerts — recovery-only setting)
+
+    fetchJson.mockResolvedValue({ json: { temp: 32 }, status: 200 });
+    const { checkLog } = await runCheck(monitor);
+
+    expect(sendAlertEmail).toHaveBeenCalledTimes(1); // only the initial break, no recovery
+    expect(checkLog.alertSent).toBeUndefined();
+  });
+
+  it('does not crash when the monitor has no alert email configured', async () => {
+    fetchJson.mockResolvedValue({ json: { temp: '32' }, status: 200 });
+    const monitor = makeMonitor({ alerts: {} });
+
+    await expect(runCheck(monitor)).resolves.toMatchObject({ outcome: 'BREAKING' });
+    expect(sendAlertEmail).toHaveBeenCalledWith(expect.objectContaining({ to: undefined }));
+  });
+
+  it('does not let an email dispatch failure affect the returned result', async () => {
+    fetchJson.mockResolvedValue({ json: { temp: '32' }, status: 200 });
+    sendAlertEmail.mockRejectedValueOnce(new Error('smtp down'));
+
+    // dispatchAlert (the real, unmocked function) wraps sendAlertEmail in its
+    // own try/catch, so even a rejection here must not reach runCheck.
+    await expect(runCheck(makeMonitor())).resolves.toMatchObject({ outcome: 'BREAKING' });
   });
 });
