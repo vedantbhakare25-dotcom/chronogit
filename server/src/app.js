@@ -4,6 +4,7 @@ import cors from 'cors';
 import monitorsRouter from './routes/monitors.js';
 import usersRouter from './routes/users.js';
 import mockRouter from './routes/mock.js';
+import notificationsRouter from './routes/notifications.js';
 import { AppError } from './utils/AppError.js';
 
 export function createApp() {
@@ -15,6 +16,7 @@ export function createApp() {
   app.get('/health', (req, res) => res.json({ ok: true }));
   app.use('/api/monitors', monitorsRouter);
   app.use('/api/users', usersRouter);
+  app.use('/api/notifications', notificationsRouter);
   app.use('/api/mock', mockRouter);
 
   app.use((req, res) => {

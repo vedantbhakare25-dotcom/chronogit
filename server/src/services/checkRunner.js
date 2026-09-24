@@ -4,7 +4,8 @@ import CheckLog from '../models/CheckLog.js';
 import User from '../models/User.js';
 import { fetchJson } from './fetcher.js';
 import { extractSchema, diffSchemas, hasBreakingChanges } from './schema/index.js';
-import { decideAlertKind, toCheckLogAlertSent, dispatchAlert } from './alerts/index.js';
+import { ALERT_KIND, decideAlertKind, toCheckLogAlertSent, dispatchAlert } from './alerts/index.js';
+import { persistInAppNotification } from './notificationService.js';
 
 export function computeBreakingFingerprint(changes) {
   const breaking = changes
@@ -70,9 +71,19 @@ export async function runCheck(monitor) {
     });
 
     monitor.status = 'ERROR';
+    monitor.lastNonBreakingFingerprint = null;
     monitor.lastCheckedAt = now;
     monitor.nextCheckAt = nextCheckAt;
     await monitor.save();
+
+    if (previousStatus !== 'ERROR') {
+      await persistInAppNotification({
+        monitor,
+        type: 'ENDPOINT_ERROR',
+        title: 'Endpoint check failed',
+        message: fetchErr.message || 'The endpoint could not be checked.',
+      });
+    }
 
     return { monitor, checkLog, outcome: 'ERROR' };
   }
@@ -84,6 +95,11 @@ export async function runCheck(monitor) {
   const breaking = hasBreakingChanges(changes);
   const outcome = breaking ? 'BREAKING' : changes.length > 0 ? 'NON_BREAKING' : 'OK';
   const newFingerprint = breaking ? computeBreakingFingerprint(changes) : null;
+  const nonBreakingFingerprint = changes.length
+    ? crypto.createHash('sha256').update(JSON.stringify(changes)).digest('hex')
+    : null;
+  const shouldNotifyNonBreaking =
+    outcome === 'NON_BREAKING' && nonBreakingFingerprint !== (monitor.lastNonBreakingFingerprint ?? null);
 
   const alertKind = decideAlertKind({
     previousStatus,
@@ -106,9 +122,28 @@ export async function runCheck(monitor) {
   monitor.latestSchema = latestSchema;
   monitor.status = breaking ? 'BREAKING' : 'HEALTHY';
   monitor.lastBreakingFingerprint = newFingerprint;
+  monitor.lastNonBreakingFingerprint = outcome === 'NON_BREAKING' ? nonBreakingFingerprint : null;
   monitor.lastCheckedAt = now;
   monitor.nextCheckAt = nextCheckAt;
   await monitor.save();
+
+  if (alertKind && alertKind !== ALERT_KIND.RECOVERY) {
+    await persistInAppNotification({
+      monitor,
+      type: 'BREAKING_DRIFT',
+      title: 'Breaking API changes detected',
+      message: `${changes.length} schema change${changes.length === 1 ? '' : 's'} detected.`,
+      diffSummary: changes,
+    });
+  } else if (shouldNotifyNonBreaking) {
+    await persistInAppNotification({
+      monitor,
+      type: 'NON_BREAKING_DRIFT',
+      title: 'Non-breaking API changes detected',
+      message: `${changes.length} schema change${changes.length === 1 ? '' : 's'} detected.`,
+      diffSummary: changes,
+    });
+  }
 
   if (alertKind) {
     const effectiveEmail = await resolveAlertRecipient(monitor);

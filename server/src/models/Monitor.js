@@ -56,6 +56,7 @@ const MonitorSchema = new Schema(
     status: { type: String, enum: ALLOWED_STATUSES, default: 'PENDING' },
 
     lastBreakingFingerprint: { type: String, default: null },
+    lastNonBreakingFingerprint: { type: String, default: null },
 
     lastCheckedAt: { type: Date, default: null },
     nextCheckAt: { type: Date, default: null, index: true },
