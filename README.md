@@ -2,141 +2,365 @@
 
 > **Autonomous API Contract Drift Engine & Breaking Change Sentinel**
 
-ChronoGit ek modern developer-first platform hai jo live external APIs aur microservices ke schema contracts ko continuously monitor karta hai. Yeh JSON responses mein aane wale breaking type mutations, dropped fields, aur structural changes ko real-time detect karta hai, Git-style side-by-side visual diff render karta hai, aur instant multi-channel alerts dispatch karta hai.
+ChronoGit is an automated API monitoring and contract drift detection platform. It continuously evaluates live microservices and external third-party endpoints, derives canonical JSON response schemas on the fly, visualizes field-level and type-level mutations in a side-by-side Git diff viewer, and dispatches multi-channel alerts (via SMTP email and an in-app notification center) whenever breaking contract drifts occur.
 
 ---
 
-## 🌟 Core Features
+## Key Features
 
-- **Automated Contract Inference:** Live JSON responses se dynamically recursive schema types (objects, primitives, nullable types, arrays) derive karta hai.
-- **Git-Style Visual Diff Viewer:** Production baseline contract aur latest response schema ke beech clean, line-by-line colored diff (Red/Green) visualization.
-- **Intelligent Drift Classification:**
-  - `HEALTHY`: Schema contract baseline ke sath perfectly align hai.
-  - `NON_BREAKING`: Naye optional fields ya non-destructive keys add huye hain.
-  - `BREAKING`: Fields delete huye hain ya existing data types mutate huye hain (e.g. `number` $\rightarrow$ `string`).
-- **Multi-Tenant Architecture:** NextAuth.js OAuth session ke through user-scoped monitors aur baseline records ki strict data isolation.
-- **Unified Alert Delivery:**
-  - Automated SMTP/Email alerts (registered account email ya custom override ke sath).
-  - In-App persistent notification bell feed unread status indicators ke sath.
-  - Anti-spam cooling logic to prevent notification fatigue.
-- **Baseline Acceptance Lifecycle:** Ek click mein updated API schema ko new canonical baseline designate karne ka workflow.
+* **Automated Contract Inference**: Recursively inspects live JSON payloads to map strict structural contracts (primitive types, objects, arrays, and nullable fields).
+
+* **Intelligent Drift Classification**:
+
+  * `HEALTHY`: Live response schema perfectly matches the saved baseline.
+  * `NON_BREAKING`: New non-destructive keys or optional fields have been introduced.
+  * `BREAKING`: Existing fields have been deleted, or types have mutated (e.g., `number` to `string`).
+
+* **Git-Style Visual Diff Viewer**: Side-by-side split screen showing the accepted baseline contract against the mutated response schema with syntax highlights.
+
+* **Multi-Tenant User Isolation**: Secured via NextAuth.js OAuth. Every monitor, check log, and notification is strictly scoped to the authenticated user ID.
+
+* **Dual Alert Channels**:
+
+  * **Email Alerts**: Dispatches automated SMTP alerts to the user's primary account email or a custom-configured destination.
+  * **In-App Notification Feed**: Persistent dashboard notification bell with real-time unread badges and direct navigation to drift diff pages.
+
+* **One-Click Baseline Promotion**: Allows developers to promote acceptable breaking changes to the new baseline with a single click, resolving active alert states.
 
 ---
 
-## 🏗️ Architecture & Tech Stack
+## Architecture & Tech Stack
 
+```text
 ┌─────────────────────────────────────────────────────────────┐
 │                     Next.js 14 Client                       │
 │           (App Router, Tailwind CSS, NextAuth BFF)          │
 └──────────────────────────────┬──────────────────────────────┘
-│ Session Scoped /api/ proxy
-▼
+                               │
+                  Session-Scoped /api/ BFF Proxy
+                               │
+                               ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                     Express.js Backend                      │
 │          (Drift Engine, Scheduler, Alert Pipeline)          │
 └──────────────┬──────────────────────────────┬───────────────┘
-│                              │
-▼                              ▼
-┌───────────────┐              ┌───────────────┐
-│  MongoDB DB   │              │ SMTP Service  │
-│  (Mongoose)   │              │  (Nodemailer) │
-└───────────────┘              └───────────────┘
+               │                              │
+               ▼                              ▼
+     ┌────────────────┐             ┌────────────────┐
+     │   MongoDB DB   │             │  SMTP Service  │
+     │   (Mongoose)   │             │  (Nodemailer)  │
+     └────────────────┘             └────────────────┘
+```
 
+### Frontend
 
-- **Frontend:** Next.js 14 (App Router), React, Tailwind CSS, Lucide Icons.
-- **Backend / Engine:** Node.js, Express.js, Custom Diff & Type Inference Algorithms.
-- **Database:** MongoDB via Mongoose (with compound indexing for sub-second telemetry lookups).
-- **Authentication:** NextAuth.js (Google OAuth 2.0) with internal secret-backed BFF hydration.
-- **Background Jobs:** Node-cron / BullMQ scheduling engine.
+* Next.js 14 (App Router)
+* React
+* Tailwind CSS
+* Lucide Icons
+* NextAuth.js
+
+### Backend
+
+* Node.js
+* Express.js
+
+### Database
+
+* MongoDB
+* Mongoose
+* Compound indexes:
+
+  * `{ userId: 1, createdAt: -1 }`
+  * `{ monitorId: 1, createdAt: -1 }`
+
+### Authentication
+
+* NextAuth.js
+* Google OAuth 2.0
+* Internal HMAC/shared-secret handshake between Next.js and Express
+
+### Background Engine
+
+* Node-cron scheduler
+* Built-in anti-spam cooldown mechanisms
 
 ---
 
-## 🚀 Quick Start & Installation
+## Getting Started
 
 ### Prerequisites
-- Node.js (v18.x or higher)
-- MongoDB running locally or a MongoDB Atlas URI
-- Google Cloud OAuth Credentials
+
+* Node.js v18.x or later
+* MongoDB instance (Local or MongoDB Atlas)
+* Google Cloud Console OAuth 2.0 Credentials
 
 ---
 
-### 1. Repository Clone & Setup
+## Installation & Local Setup
+
+### 1. Clone the Repository
 
 ```bash
-git clone [https://github.com/your-username/chronogit.git](https://github.com/your-username/chronogit.git)
+git clone https://github.com/your-username/chronogit.git
 cd chronogit
-2. Backend Configuration (server/)
-Move into the server folder and install dependencies:
+```
 
-Bash
+### 2. Backend Setup (`server/`)
+
+Navigate to the backend directory and install packages:
+
+```bash
 cd server
 npm install
-Create a .env file in server/:
+```
 
-Code snippet
+Create a `.env` file inside `server/`:
+
+```env
 PORT=4000
 MONGO_URI=mongodb://localhost:27017/chronogit
-INTERNAL_API_SECRET=your_super_secret_internal_key
+INTERNAL_API_SECRET=your_secure_random_internal_secret
 
-# SMTP Configuration (Optional in dev; falls back to console/Ethereal)
+# SMTP Configuration
+# Optional in development; defaults to Ethereal/mock logs
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
 SMTP_USER=your-email@gmail.com
-SMTP_PASS=your-16-digit-app-password
+SMTP_PASS=your-16-character-google-app-password
 ALERT_FROM_EMAIL=your-email@gmail.com
-Start backend dev server:
+```
 
-Bash
+Run the backend development server:
+
+```bash
 npm run dev
-3. Frontend Configuration (client/)
-Move into the client folder and install dependencies:
+```
 
-Bash
+---
+
+### 3. Frontend Setup (`client/`)
+
+Open a new terminal and navigate to the client directory:
+
+```bash
 cd ../client
 npm install
-Create a .env.local file in client/:
+```
 
-Code snippet
+Create a `.env.local` file inside `client/`:
+
+```env
 NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=your_random_generated_secret_string
+NEXTAUTH_SECRET=your_generated_nextauth_secret
 
-# Google OAuth
-GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=your-google-client-secret
+# Google OAuth Credentials
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=your-client-secret
 
-# Backend BFF Proxy Config
+# Backend BFF Configuration
 EXPRESS_API_URL=http://localhost:4000
-INTERNAL_API_SECRET=your_super_secret_internal_key
-Start Next.js client dev server:
+INTERNAL_API_SECRET=your_secure_random_internal_secret
+```
 
-Bash
+Run the Next.js development server:
+
+```bash
 npm run dev
-Open http://localhost:3000 in your browser.
+```
 
-🧪 Testing
-Backend Unit & Integration Tests
-ChronoGit contains a comprehensive test suite validating drift inference, diff calculations, anti-spam mechanisms, and monitor access ownership.
+Visit:
 
-Bash
+```text
+http://localhost:3000
+```
+
+---
+
+## Verification & Testing
+
+### Running Backend Unit & Integration Tests
+
+```bash
 cd server
 npm test
-Production Build Verification
-To ensure all dynamic server components and chunk dependencies compile cleanly:
+```
 
-Bash
+### Validating the Production Build
+
+```bash
 cd client
 npm run build
-🛠️ Testing Real-Time Drift Simulation
-ChronoGit provides an in-built mock endpoint to instantly simulate API drift:
+```
 
-Add a monitor with URL:
+---
+
+## Live Drift Simulation Guide
+
+ChronoGit includes a built-in mock endpoint to test schema drift behavior in development.
+
+### 1. Create a Monitor
+
+Click **+ Add Monitor** in the dashboard and enter:
+
+```text
 http://localhost:4000/api/mock/weather
-(Status: HEALTHY - Baseline captured).
+```
 
-Trigger non-breaking mutation:
+The baseline schema will be captured and the monitor status should display:
+
+```text
+HEALTHY
+```
+
+### 2. Test Non-Breaking Drift
+
+Append the `drift=nonbreaking` parameter:
+
+```text
 http://localhost:4000/api/mock/weather?drift=nonbreaking
-(Status: NON_BREAKING - New field highlighted in green).
+```
 
-Trigger breaking contract drift:
+The status transitions to:
+
+```text
+NON_BREAKING
+```
+
+New fields are flagged in green in the diff viewer.
+
+### 3. Test Breaking Drift
+
+Append the `drift=breaking` parameter:
+
+```text
 http://localhost:4000/api/mock/weather?drift=breaking
-(Status: BREAKING - Incompatible types flagged in red, alerts dispatched to email & in-app bell).
+```
+
+The status transitions to:
+
+```text
+BREAKING
+```
+
+Field deletions and type mutations are flagged in red, triggering:
+
+* Email alerts
+* In-app notifications
+
+### 4. Accept the New Baseline
+
+Navigate to the Diff View page and click:
+
+**Accept as New Baseline**
+
+The new schema becomes the accepted baseline and the monitor returns to:
+
+```text
+HEALTHY
+```
+
+---
+
+## Drift Classification
+
+| Status         | Description                                         |
+| -------------- | --------------------------------------------------- |
+| `HEALTHY`      | Live response schema matches the saved baseline     |
+| `NON_BREAKING` | New non-destructive fields have been added          |
+| `BREAKING`     | Existing fields were removed or their types changed |
+
+---
+
+## Project Structure
+
+```text
+chronogit/
+├── client/
+│   ├── app/
+│   ├── components/
+│   ├── lib/
+│   └── ...
+│
+├── server/
+│   ├── controllers/
+│   ├── models/
+│   ├── routes/
+│   ├── services/
+│   ├── scheduler/
+│   └── ...
+│
+└── README.md
+```
+
+---
+
+## Core Workflow
+
+```text
+Live API Endpoint
+       │
+       ▼
+Fetch JSON Response
+       │
+       ▼
+Infer Canonical Schema
+       │
+       ▼
+Compare Against Baseline
+       │
+       ├───────────────┐
+       ▼               ▼
+    HEALTHY       Schema Drift
+                       │
+                ┌──────┴──────┐
+                ▼             ▼
+          NON_BREAKING     BREAKING
+                              │
+                       ┌──────┴──────┐
+                       ▼             ▼
+                  Email Alert   In-App Alert
+                                      │
+                                      ▼
+                              Git-Style Diff
+                                      │
+                                      ▼
+                            Accept New Baseline
+```
+
+---
+
+## Security
+
+ChronoGit uses multiple layers of isolation and authentication:
+
+* Google OAuth 2.0 authentication through NextAuth.js
+* Session-scoped backend requests
+* HMAC/shared-secret authentication between the Next.js BFF and Express backend
+* User-specific data isolation
+* User-scoped monitors, check logs, and notifications
+* Environment variables for sensitive credentials and secrets
+
+> **Never commit `.env`, `.env.local`, OAuth credentials, SMTP passwords, or internal API secrets to version control.**
+
+---
+
+## Future Enhancements
+
+Potential future improvements include:
+
+* Support for OpenAPI/Swagger contract imports
+* Webhook-based alerts
+* Slack and Discord notifications
+* API authentication templates
+* Historical schema versioning
+* Advanced scheduling controls
+* Custom breaking-change rules
+* Team-based collaboration
+* CI/CD integration
+* GitHub Actions integration
+* Public API for automated contract checks
+
+---
+
+
