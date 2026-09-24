@@ -32,7 +32,15 @@ vi.mock('../../src/models/Monitor.js', () => {
     sort: vi.fn().mockReturnThis(),
     lean: vi.fn().mockResolvedValue(leanDocs),
   };
-  return { default: { find: vi.fn(() => chain) } };
+  return {
+    default: {
+      find: vi.fn(() => chain),
+      findOneAndUpdate: vi.fn(async (filter, update) => {
+        const monitor = leanDocs.find((item) => item._id === String(filter._id));
+        return monitor ? { ...monitor, userId: update.$set.userId } : null;
+      }),
+    },
+  };
 });
 
 const { createApp } = await import('../../src/app.js');

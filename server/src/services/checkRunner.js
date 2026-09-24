@@ -1,23 +1,11 @@
 import crypto from 'node:crypto';
 
 import CheckLog from '../models/CheckLog.js';
+import User from '../models/User.js';
 import { fetchJson } from './fetcher.js';
 import { extractSchema, diffSchemas, hasBreakingChanges } from './schema/index.js';
 import { decideAlertKind, toCheckLogAlertSent, dispatchAlert } from './alerts/index.js';
 
-/**
- * A stable fingerprint for "the set of breaking changes right now". Used to
- * tell BREAKING -> BREAKING transitions apart (Phase 5): same fingerprint
- * means the same break is still open, a different one means new damage
- * happened on top of it, so a follow-up alert is warranted.
- *
- * Deliberately includes the from/to types, not just kind+path — a field
- * mutating twice (number -> string -> boolean) is two distinct breaks on
- * the same path, and should produce two different fingerprints.
- *
- * @param {import('./schema/diffSchemas.js').SchemaChange[]} changes
- * @returns {string|null} null when there is nothing breaking to fingerprint
- */
 export function computeBreakingFingerprint(changes) {
   const breaking = changes
     .filter((change) => change.breaking)
@@ -29,21 +17,25 @@ export function computeBreakingFingerprint(changes) {
 }
 
 /**
- * Runs one check for a single monitor: fetches the endpoint, compares its
- * shape against the accepted baseline, writes a CheckLog, and updates the
- * monitor's status fields. Used by the manual "check now" route and, in
- * Phase 4, by the scheduler.
- *
- * The caller owns loading and persisting the monitor elsewhere if needed —
- * this function calls `monitor.save()` itself once it has decided the new
- * state, so callers don't have to remember to.
- *
- * @param {import('mongoose').Document} monitor  a Monitor document
- * @returns {Promise<{ monitor: import('mongoose').Document, checkLog: import('mongoose').Document, outcome: 'OK'|'NON_BREAKING'|'BREAKING'|'ERROR' }>}
+ * Resolves effective recipient: monitor specific override > user preferred email
  */
+async function resolveAlertRecipient(monitor) {
+  if (monitor.alerts?.email !== undefined) return monitor.alerts.email;
+
+  if (monitor.userId) {
+    try {
+      const user = await User.findById(monitor.userId);
+      if (user && typeof user.getEffectiveAlertEmail === 'function') {
+        return user.getEffectiveAlertEmail();
+      }
+    } catch {
+      // safe fallback
+    }
+  }
+  return undefined;
+}
+
 export async function runCheck(monitor) {
-  // Captured before anything below mutates the monitor, so the alert state
-  // machine can compare "what it was" against "what it's about to become".
   const previousStatus = monitor.status;
   const previousFingerprint = monitor.lastBreakingFingerprint;
 
@@ -54,7 +46,9 @@ export async function runCheck(monitor) {
   try {
     fetchResult = await fetchJson({
       url: monitor.url,
-      headers: Object.fromEntries(monitor.headers ?? new Map()),
+      headers: monitor.headers instanceof Map 
+        ? Object.fromEntries(monitor.headers) 
+        : (monitor.headers ?? {}),
     });
   } catch (err) {
     fetchErr = err;
@@ -62,9 +56,6 @@ export async function runCheck(monitor) {
 
   const responseTimeMs = Date.now() - startedAt;
   const now = new Date();
-  // Re-anchor the schedule from "now" rather than the old nextCheckAt, so a
-  // check that ran late (or was triggered manually) doesn't fire again
-  // immediately. Used by Phase 4's scheduler.
   const nextCheckAt = new Date(now.getTime() + monitor.intervalMinutes * 60_000);
 
   if (fetchErr) {
@@ -78,9 +69,6 @@ export async function runCheck(monitor) {
       changes: [],
     });
 
-    // Baseline AND latestSchema are left untouched: a failed fetch gave us
-    // no new information about the endpoint's shape, so there is nothing
-    // to compare or record beyond the failure itself.
     monitor.status = 'ERROR';
     monitor.lastCheckedAt = now;
     monitor.nextCheckAt = nextCheckAt;
@@ -97,15 +85,12 @@ export async function runCheck(monitor) {
   const outcome = breaking ? 'BREAKING' : changes.length > 0 ? 'NON_BREAKING' : 'OK';
   const newFingerprint = breaking ? computeBreakingFingerprint(changes) : null;
 
-  // Alert decision only ever depends on the BREAKING/HEALTHY transition and
-  // fingerprint — never on ERROR, which is handled entirely above and never
-  // reaches here. Pure and I/O-free, so it can't itself go wrong.
   const alertKind = decideAlertKind({
     previousStatus,
     previousFingerprint,
     newStatus: breaking ? 'BREAKING' : 'HEALTHY',
     newFingerprint,
-    notifyOnRecovery: monitor.alerts?.notifyOnRecovery !== false, // default true if unset
+    notifyOnRecovery: monitor.alerts?.notifyOnRecovery !== false,
   });
 
   const checkLog = await CheckLog.create({
@@ -125,11 +110,26 @@ export async function runCheck(monitor) {
   monitor.nextCheckAt = nextCheckAt;
   await monitor.save();
 
-  // Dispatched only after the CheckLog and monitor are safely persisted, so
-  // an email/SMTP failure (which dispatchAlert already never lets escape)
-  // can't put those writes at risk either way.
   if (alertKind) {
-    await dispatchAlert(alertKind, { monitor, changes, responseTimeMs });
+    const effectiveEmail = await resolveAlertRecipient(monitor);
+    
+    const baseMonitor = typeof monitor.toObject === 'function' 
+      ? monitor.toObject() 
+      : { ...monitor };
+
+    const monitorWithResolvedEmail = {
+      ...baseMonitor,
+      alerts: {
+        ...(baseMonitor.alerts ?? {}),
+        email: effectiveEmail,
+      },
+    };
+
+    await dispatchAlert(alertKind, {
+      monitor: monitorWithResolvedEmail,
+      changes,
+      responseTimeMs,
+    });
   }
 
   return { monitor, checkLog, outcome };

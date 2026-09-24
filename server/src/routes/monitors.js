@@ -9,23 +9,33 @@ import { runCheck } from '../services/checkRunner.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { badRequest, notFound } from '../utils/AppError.js';
 import { parseCreateMonitorInput, parseUpdateMonitorInput, parsePagination } from '../utils/validators.js';
+import { requireInternalAuth } from '../middlewares/auth.js';
 
 const router = Router();
 
-/** Loads req.params.id as a Monitor doc, or throws 400/404. Shared by the routes below. */
-async function loadMonitor(id) {
+// Apply auth middleware to all monitor operations
+router.use(requireInternalAuth());
+
+/** Loads monitor scoped to req.userId if available, or throws 400/404 */
+async function loadMonitor(id, userId) {
   if (!mongoose.isValidObjectId(id)) throw badRequest('Invalid monitor id');
-  const monitor = await Monitor.findById(id);
+  if (!mongoose.isValidObjectId(userId)) throw badRequest('Invalid authenticated user ID');
+  const monitor = await Monitor.findOne({ _id: id, $or: [{ userId }, { userId: null }] });
   if (!monitor) throw notFound('Monitor not found');
+  if (!monitor.userId) {
+    const claimed = await Monitor.findOneAndUpdate(
+      { _id: monitor._id, userId: null },
+      { $set: { userId } },
+      { new: true }
+    );
+    if (!claimed) throw notFound('Monitor not found');
+    return claimed;
+  }
   return monitor;
 }
 
 /**
  * POST /api/monitors
- * Registers a new monitor: fetches the endpoint right away and stores the
- * resulting schema as both the baseline and the latest schema. Registration
- * fails (400) if the endpoint can't be reached or isn't valid JSON — there's
- * no useful baseline to save otherwise.
  */
 router.post(
   '/',
@@ -44,6 +54,7 @@ router.post(
 
     const monitor = await Monitor.create({
       ...input,
+      userId: req.userId,
       baselineSchema: schema,
       latestSchema: schema,
       status: 'HEALTHY',
@@ -55,42 +66,57 @@ router.post(
   })
 );
 
-/** GET /api/monitors — list monitors, newest first. Baseline/latest schemas omitted (can be large). */
+/** GET /api/monitors — list user monitors */
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    const monitors = await Monitor.find()
+    if (!mongoose.isValidObjectId(req.userId)) throw badRequest('Invalid authenticated user ID');
+    const monitors = await Monitor.find({ $or: [{ userId: req.userId }, { userId: null }] })
       .select('-baselineSchema -latestSchema')
       .sort({ createdAt: -1 })
       .lean();
-    // .lean() returns plain objects straight from the driver, so a Map field
-    // (headers) is already a plain { key: value } object here, NOT a Map
-    // instance — Object.fromEntries() would throw on that (not iterable).
-    res.json(monitors.map((m) => ({ ...m, headers: m.headers ?? {} })));
+
+    const scopedMonitors = [];
+    for (const monitor of monitors) {
+      if (!monitor.userId) {
+        const claimed = await Monitor.findOneAndUpdate(
+          { _id: monitor._id, userId: null },
+          { $set: { userId: req.userId } },
+          { new: true }
+        );
+        if (!claimed) continue;
+      }
+      scopedMonitors.push({ ...monitor, userId: req.userId, headers: monitor.headers ?? {} });
+    }
+
+    res.json(scopedMonitors);
   })
 );
 
-/** GET /api/monitors/:id — full detail, including both schemas (for the diff viewer). */
+/** GET /api/monitors/:id — full detail */
 router.get(
   '/:id',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id);
-    res.json(monitor.toClientJSON());
+    const monitor = await loadMonitor(req.params.id, req.userId);
+    res.json({
+      ...monitor.toClientJSON(),
+      pendingChanges: diffSchemas(monitor.baselineSchema, monitor.latestSchema, {
+        ignorePaths: monitor.ignorePaths,
+      }),
+    });
   })
 );
 
-/** PUT /api/monitors/:id — update mutable settings. Not for url or schema fields — see /accept for the baseline. */
+/** PUT /api/monitors/:id */
 router.put(
   '/:id',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id);
+    const monitor = await loadMonitor(req.params.id, req.userId);
     const update = parseUpdateMonitorInput(req.body);
 
     Object.assign(monitor, update);
     if (update.headers) monitor.headers = new Map(Object.entries(update.headers));
     if (update.intervalMinutes) {
-      // Re-anchor the schedule so a shorter interval takes effect immediately
-      // instead of waiting out however much of the old interval is left.
       const base = monitor.lastCheckedAt ?? new Date();
       monitor.nextCheckAt = new Date(base.getTime() + update.intervalMinutes * 60_000);
     }
@@ -100,40 +126,40 @@ router.put(
   })
 );
 
-/** DELETE /api/monitors/:id — removes the monitor and its check history. */
+/** DELETE /api/monitors/:id */
 router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id);
+    const monitor = await loadMonitor(req.params.id, req.userId);
     await Promise.all([CheckLog.deleteMany({ monitorId: monitor._id }), monitor.deleteOne()]);
     res.status(204).send();
   })
 );
 
-/**
- * POST /api/monitors/:id/check
- * Runs a check immediately instead of waiting for the scheduler (Phase 4).
- * Useful for demos and for confirming a monitor is set up correctly.
- */
+/** POST /api/monitors/:id/check */
 router.post(
   '/:id/check',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id);
+    const monitor = await loadMonitor(req.params.id, req.userId);
     const { checkLog, outcome } = await runCheck(monitor);
-    res.json({ monitor: monitor.toClientJSON(), checkLog, outcome });
+    res.json({
+      monitor: {
+        ...monitor.toClientJSON(),
+        pendingChanges: diffSchemas(monitor.baselineSchema, monitor.latestSchema, {
+          ignorePaths: monitor.ignorePaths,
+        }),
+      },
+      checkLog,
+      outcome,
+    });
   })
 );
 
-/**
- * POST /api/monitors/:id/accept
- * Promotes the current latestSchema to be the new baseline — the user
- * looked at the diff and decided the change (renamed field, new key,
- * whatever) is intentional. Clears the breaking status and fingerprint.
- */
+/** POST /api/monitors/:id/accept */
 router.post(
   '/:id/accept',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id);
+    const monitor = await loadMonitor(req.params.id, req.userId);
     const pending = diffSchemas(monitor.baselineSchema, monitor.latestSchema, {
       ignorePaths: monitor.ignorePaths,
     });
@@ -150,14 +176,11 @@ router.post(
   })
 );
 
-/**
- * GET /api/monitors/:id/logs?limit=20&before=<ISO date>
- * Cursor-paginated check history, newest first.
- */
+/** GET /api/monitors/:id/logs */
 router.get(
   '/:id/logs',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id);
+    const monitor = await loadMonitor(req.params.id, req.userId);
     const { limit, before } = parsePagination(req.query);
 
     const filter = { monitorId: monitor._id, ...(before && { checkedAt: { $lt: before } }) };

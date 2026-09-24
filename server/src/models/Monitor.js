@@ -15,6 +15,13 @@ const ALLOWED_STATUSES = ['PENDING', 'HEALTHY', 'BREAKING', 'ERROR'];
 
 const MonitorSchema = new Schema(
   {
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      index: true,
+      default: null,
+    },
+
     name: { type: String, required: true, trim: true, maxlength: 120 },
 
     url: {
@@ -28,11 +35,9 @@ const MonitorSchema = new Schema(
     },
 
     // Custom headers to send with each check, e.g. { "x-api-key": "..." }.
-    // Stored as a Map so arbitrary header names are allowed without a fixed schema.
     headers: { type: Map, of: String, default: () => new Map() },
 
-    // Paths (in extractSchema's "$.foo.bar[]" notation) to exclude from drift
-    // detection entirely — for object keyed by ids/dates, etc.
+    // Paths to exclude from drift detection entirely
     ignorePaths: {
       type: [String],
       default: [],
@@ -50,8 +55,6 @@ const MonitorSchema = new Schema(
 
     status: { type: String, enum: ALLOWED_STATUSES, default: 'PENDING' },
 
-    // Hash of the current breaking changes, so the alerter can tell
-    // "still the same break" apart from "a new break appeared" (Phase 5).
     lastBreakingFingerprint: { type: String, default: null },
 
     lastCheckedAt: { type: Date, default: null },
@@ -66,8 +69,10 @@ const MonitorSchema = new Schema(
   { timestamps: true }
 );
 
-// Scheduler's core query (Phase 4): active monitors due for a check.
+// Scheduler index
 MonitorSchema.index({ isActive: 1, nextCheckAt: 1 });
+// User-scoped fast lookup index
+MonitorSchema.index({ userId: 1, createdAt: -1 });
 
 /** Flat, JSON-friendly view used by the API — Map -> plain object for headers. */
 MonitorSchema.methods.toClientJSON = function toClientJSON() {
