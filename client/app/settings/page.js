@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import Navbar from '@/components/Navbar';
 
 export default function SettingsPage() {
@@ -65,6 +66,9 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-neutral-950 text-white">
       <Navbar />
       <main className="max-w-2xl mx-auto px-4 py-10">
+        <Link href="/" className="text-zinc-400 hover:text-white inline-flex items-center gap-2 mb-6 text-sm">
+          ← Back to Monitors
+        </Link>
         <h1 className="text-xl font-semibold">Alert email settings</h1>
         <p className="mt-2 text-sm text-neutral-400">Google account: {accountEmail || session?.user?.email || '—'}</p>
         {loading ? <p className="mt-6 text-sm text-neutral-400">Loading preferences…</p> : (

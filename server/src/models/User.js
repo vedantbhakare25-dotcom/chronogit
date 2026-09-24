@@ -4,8 +4,8 @@ const { Schema } = mongoose;
 
 const UserSchema = new Schema(
   {
-    googleId: { type: String, required: true, unique: true, index: true },
-    email: { type: String, required: true, lowercase: true, trim: true },
+    googleId: { type: String, required: true, unique: true },
+    email: { type: String, required: true, lowercase: true, trim: true, unique: true },
     name: { type: String, default: '', trim: true },
     avatar: { type: String, default: '' },
     // User can choose between their sign-in email or a custom/team notification email

@@ -86,7 +86,7 @@ router.get(
   asyncHandler(async (req, res) => {
     if (!mongoose.isValidObjectId(req.userId)) throw badRequest('Invalid authenticated user ID');
     const monitors = await Monitor.find({ $or: [{ userId: req.userId }, { userId: null }] })
-      .select('-baselineSchema -latestSchema')
+      .select('_id userId name url status intervalMinutes isActive lastCheckedAt nextCheckAt createdAt')
       .sort({ createdAt: -1 })
       .lean();
 
@@ -100,7 +100,17 @@ router.get(
         );
         if (!claimed) continue;
       }
-      scopedMonitors.push({ ...monitor, userId: req.userId, headers: monitor.headers ?? {} });
+      scopedMonitors.push({
+        _id: monitor._id,
+        name: monitor.name,
+        url: monitor.url,
+        status: monitor.status,
+        intervalMinutes: monitor.intervalMinutes,
+        isActive: monitor.isActive,
+        lastCheckedAt: monitor.lastCheckedAt,
+        nextCheckAt: monitor.nextCheckAt,
+        createdAt: monitor.createdAt,
+      });
     }
 
     res.json(scopedMonitors);

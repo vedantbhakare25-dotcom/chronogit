@@ -178,13 +178,10 @@ export default function Navbar() {
               </Link>
 
               <div className="flex items-center gap-2.5 border-l border-neutral-800 pl-2">
-                {session.user.image ? (
-                  <img src={session.user.image} alt={session.user.name || 'User'} className="h-7 w-7 rounded-full border border-neutral-700" />
-                ) : (
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full border border-neutral-700 bg-neutral-800 text-xs font-medium">
-                    {session.user.name?.[0] || 'U'}
-                  </div>
-                )}
+                <div aria-label={session.user.name || 'User'} title={session.user.name || 'User'}
+                  className="flex h-7 w-7 items-center justify-center rounded-full border border-neutral-700 bg-neutral-800 text-xs font-medium text-neutral-200">
+                  {session.user.name?.trim().split(/\s+/).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || 'U'}
+                </div>
                 <button onClick={() => signOut()} className="flex items-center gap-1 text-xs text-neutral-400 transition hover:text-rose-400">
                   <LogOut className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">Sign Out</span>

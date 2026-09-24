@@ -16,7 +16,7 @@ const SchemaChangeSchema = new Schema(
 const THIRTY_DAYS_SECONDS = 30 * 24 * 60 * 60;
 
 const CheckLogSchema = new Schema({
-  monitorId: { type: Schema.Types.ObjectId, ref: 'Monitor', required: true, index: true },
+  monitorId: { type: Schema.Types.ObjectId, ref: 'Monitor', required: true },
 
   checkedAt: {
     type: Date,
@@ -25,6 +25,8 @@ const CheckLogSchema = new Schema({
     // Keeps a free-tier Atlas cluster from filling up with old logs.
     expires: THIRTY_DAYS_SECONDS,
   },
+
+  createdAt: { type: Date, default: Date.now },
 
   outcome: { type: String, enum: ['OK', 'NON_BREAKING', 'BREAKING', 'ERROR'], required: true },
 
@@ -40,5 +42,6 @@ const CheckLogSchema = new Schema({
 
 // Check-history endpoint: latest logs for one monitor.
 CheckLogSchema.index({ monitorId: 1, checkedAt: -1 });
+CheckLogSchema.index({ monitorId: 1, createdAt: -1 });
 
 export default mongoose.model('CheckLog', CheckLogSchema);

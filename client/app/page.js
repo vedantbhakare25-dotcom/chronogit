@@ -8,6 +8,9 @@ import AddMonitorModal from '@/components/AddMonitorModal';
 import AlertPreferenceModal from '@/components/AlertPreferenceModal';
 import { Plus, RefreshCw, Activity, ShieldCheck, AlertTriangle, XCircle } from 'lucide-react';
 
+const DASHBOARD_CACHE_TTL_MS = 30_000;
+const dashboardCache = new Map();
+
 export default function DashboardPage() {
   const { data: session, status } = useSession();
   const [monitors, setMonitors] = useState([]);
@@ -23,6 +26,14 @@ export default function DashboardPage() {
       if (res.ok) {
         const data = await res.json();
         setMonitors(data);
+        const userId = session?.user?.id;
+        if (userId) {
+          dashboardCache.set(userId, {
+            ...dashboardCache.get(userId),
+            monitors: data,
+            updatedAt: Date.now(),
+          });
+        }
       }
     } catch (err) {
       console.error('Failed to fetch monitors:', err);
@@ -32,30 +43,54 @@ export default function DashboardPage() {
   };
 
   useEffect(() => {
-    if (status === 'authenticated') {
-      fetchMonitors();
-    } else if (status === 'unauthenticated') {
+    const userId = session?.user?.id;
+    if (status === 'unauthenticated') {
       setLoading(false);
-    }
-  }, [status]);
-
-  useEffect(() => {
-    if (status !== 'authenticated' || !session?.user?.id) {
+      setMonitors([]);
       setAlertProfile(null);
       return;
     }
+    if (status !== 'authenticated' || !userId) return;
+
     let cancelled = false;
-    const dismissalKey = `alert-email-onboarding-dismissed:${session.user.id}`;
+    const dismissalKey = `alert-email-onboarding-dismissed:${userId}`;
     setOnboardingDismissed(
       typeof window !== 'undefined' && window.sessionStorage.getItem(dismissalKey) === '1'
     );
-    fetch('/api/user/preferences')
-      .then(async (res) => {
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Could not load alert preferences');
-        if (!cancelled) setAlertProfile(data);
+    const cached = dashboardCache.get(userId);
+    if (cached) {
+      setMonitors(cached.monitors || []);
+      setAlertProfile(cached.profile || null);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    if (cached && Date.now() - cached.updatedAt < DASHBOARD_CACHE_TTL_MS) {
+      return () => { cancelled = true; };
+    }
+
+    // Load monitor cards and profile preferences in parallel; either result
+    // can render from cache while stale data is being refreshed.
+    Promise.allSettled([fetch('/api/monitors'), fetch('/api/user/preferences')])
+      .then(async ([monitorResult, profileResult]) => {
+        if (monitorResult.status === 'rejected') throw monitorResult.reason;
+        const monitorResponse = monitorResult.value;
+        const profileResponse = profileResult.status === 'fulfilled' ? profileResult.value : null;
+        const [monitorData, profileData] = await Promise.all([
+          monitorResponse.json().catch(() => ({})),
+          profileResponse?.json().catch(() => ({})) || Promise.resolve({}),
+        ]);
+        if (!monitorResponse.ok) throw new Error(monitorData.error || 'Could not load monitors');
+        if (cancelled) return;
+        setMonitors(monitorData);
+        const profile = profileResponse?.ok ? profileData : (cached?.profile || null);
+        setAlertProfile(profile);
+        dashboardCache.set(userId, { monitors: monitorData, profile, updatedAt: Date.now() });
       })
-      .catch((err) => console.error('Failed to fetch alert preferences:', err));
+      .catch((err) => console.error('Failed to load dashboard data:', err))
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => { cancelled = true; };
   }, [status, session?.user?.id]);
 
@@ -67,6 +102,15 @@ export default function DashboardPage() {
         setMonitors((prev) =>
           prev.map((m) => (m._id === id ? { ...m, ...data.monitor } : m))
         );
+        const userId = session?.user?.id;
+        if (userId) {
+          const cached = dashboardCache.get(userId);
+          if (cached) dashboardCache.set(userId, {
+            ...cached,
+            monitors: cached.monitors.map((monitor) => monitor._id === id ? { ...monitor, ...data.monitor } : monitor),
+            updatedAt: Date.now(),
+          });
+        }
       }
     } catch (err) {
       console.error('Check run failed:', err);
@@ -79,6 +123,15 @@ export default function DashboardPage() {
       const res = await fetch(`/api/monitors/${id}`, { method: 'DELETE' });
       if (res.ok) {
         setMonitors((prev) => prev.filter((m) => m._id !== id));
+        const userId = session?.user?.id;
+        if (userId) {
+          const cached = dashboardCache.get(userId);
+          if (cached) dashboardCache.set(userId, {
+            ...cached,
+            monitors: cached.monitors.filter((monitor) => monitor._id !== id),
+            updatedAt: Date.now(),
+          });
+        }
       }
     } catch (err) {
       console.error('Delete failed:', err);
@@ -87,6 +140,15 @@ export default function DashboardPage() {
 
   const handleCreated = (newMonitor) => {
     setMonitors((prev) => [newMonitor, ...prev]);
+    const userId = session?.user?.id;
+    if (userId) {
+      const cached = dashboardCache.get(userId);
+      if (cached) dashboardCache.set(userId, {
+        ...cached,
+        monitors: [newMonitor, ...(cached.monitors || [])],
+        updatedAt: Date.now(),
+      });
+    }
   };
 
   const dismissAlertOnboarding = () => {
