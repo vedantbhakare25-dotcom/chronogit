@@ -2,6 +2,7 @@ import { Router } from 'express';
 import mongoose from 'mongoose';
 
 import Monitor from '../models/Monitor.js';
+import User from '../models/User.js';
 import CheckLog from '../models/CheckLog.js';
 import { fetchJson } from '../services/fetcher.js';
 import { extractSchema, diffSchemas } from '../services/schema/index.js';
@@ -41,6 +42,18 @@ router.post(
   '/',
   asyncHandler(async (req, res) => {
     const input = parseCreateMonitorInput(req.body);
+    const alerts = { ...input.alerts };
+
+    // An explicit non-empty monitor recipient wins. Otherwise inherit the
+    // user's saved preference so every new monitor is alert-ready by default.
+    if (typeof alerts.email !== 'string' || !alerts.email.trim()) {
+      const user = await User.findById(req.userId);
+      if (!user) throw notFound('User not found');
+      alerts.email = user.getEffectiveAlertEmail?.() || user.email;
+    } else {
+      alerts.email = alerts.email.trim();
+    }
+    if (!alerts.email) throw badRequest('No alert email is configured for this user');
 
     let fetchResult;
     try {
@@ -54,6 +67,7 @@ router.post(
 
     const monitor = await Monitor.create({
       ...input,
+      alerts,
       userId: req.userId,
       baselineSchema: schema,
       latestSchema: schema,

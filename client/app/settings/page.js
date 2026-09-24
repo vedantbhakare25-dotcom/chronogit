@@ -6,10 +6,11 @@ import { useRouter } from 'next/navigation';
 import Navbar from '@/components/Navbar';
 
 export default function SettingsPage() {
-  const { status } = useSession();
+  const { data: session, status } = useSession();
   const router = useRouter();
   const [preference, setPreference] = useState({ type: 'ACCOUNT_EMAIL', customEmail: '' });
   const [effectiveEmail, setEffectiveEmail] = useState('');
+  const [accountEmail, setAccountEmail] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -25,11 +26,12 @@ export default function SettingsPage() {
           type: data.alertEmailPreference?.type || 'ACCOUNT_EMAIL',
           customEmail: data.alertEmailPreference?.customEmail || '',
         });
+        setAccountEmail(data.email || session?.user?.email || '');
         setEffectiveEmail(data.effectiveAlertEmail || '');
       })
       .catch((err) => setMessage(err.message))
       .finally(() => setLoading(false));
-  }, [status, router]);
+  }, [status, router, session?.user?.email]);
 
   async function save(event) {
     event.preventDefault();
@@ -64,6 +66,7 @@ export default function SettingsPage() {
       <Navbar />
       <main className="max-w-2xl mx-auto px-4 py-10">
         <h1 className="text-xl font-semibold">Alert email settings</h1>
+        <p className="mt-2 text-sm text-neutral-400">Google account: {accountEmail || session?.user?.email || '—'}</p>
         {loading ? <p className="mt-6 text-sm text-neutral-400">Loading preferences…</p> : (
           <form onSubmit={save} className="mt-6 space-y-5 rounded-xl border border-neutral-800 bg-neutral-900/40 p-5">
             <label className="flex items-center gap-3 text-sm">

@@ -72,7 +72,8 @@ router.put(
     if (!['ACCOUNT_EMAIL', 'CUSTOM_EMAIL'].includes(type)) {
       throw badRequest("type must be 'ACCOUNT_EMAIL' or 'CUSTOM_EMAIL'");
     }
-    if (type === 'CUSTOM_EMAIL' && (!customEmail || !customEmail.includes('@'))) {
+    if (type === 'CUSTOM_EMAIL' &&
+      (typeof customEmail !== 'string' || !/^[^\s@]+@[^\s@]+$/.test(customEmail.trim()))) {
       throw badRequest('A valid customEmail is required when type is CUSTOM_EMAIL');
     }
 
@@ -81,7 +82,8 @@ router.put(
 
     user.alertEmailPreference = {
       type,
-      customEmail: type === 'CUSTOM_EMAIL' ? customEmail : null,
+      customEmail: type === 'CUSTOM_EMAIL' ? customEmail.trim() : null,
+      confirmedAt: new Date(),
     };
     await user.save();
 

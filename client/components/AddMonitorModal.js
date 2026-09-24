@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { X, Plus, Sparkles } from 'lucide-react';
 
-export default function AddMonitorModal({ isOpen, onClose, onCreated }) {
+export default function AddMonitorModal({ isOpen, onClose, onCreated, effectiveAlertEmail = '' }) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [intervalMinutes, setIntervalMinutes] = useState(15);
@@ -33,7 +33,7 @@ export default function AddMonitorModal({ isOpen, onClose, onCreated }) {
           name,
           url,
           intervalMinutes: Number(intervalMinutes),
-          alerts: email ? { email } : {},
+          alerts: email.trim() ? { email: email.trim() } : {},
         }),
       });
 
@@ -128,14 +128,19 @@ export default function AddMonitorModal({ isOpen, onClose, onCreated }) {
             </div>
 
             <div>
-              <label className="block text-xs font-medium text-neutral-300 mb-1">Custom Alert Email (Optional)</label>
+              <label className="block text-xs font-medium text-neutral-300 mb-1">Per-monitor Alert Email (Optional)</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="Leave blank for profile default"
+                placeholder={effectiveAlertEmail ? `Default: ${effectiveAlertEmail}` : 'Uses your profile alert email'}
                 className="w-full px-3 py-2 rounded-lg bg-neutral-950 border border-neutral-800 text-sm text-white focus:outline-none focus:border-rose-500"
               />
+              <p className="mt-1 text-[11px] text-neutral-500">
+                {effectiveAlertEmail
+                  ? `Leave blank to use ${effectiveAlertEmail}.`
+                  : 'Leave blank to use your saved alert preference.'}
+              </p>
             </div>
           </div>
 

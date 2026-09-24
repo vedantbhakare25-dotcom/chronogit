@@ -16,6 +16,7 @@ const UserSchema = new Schema(
         default: 'ACCOUNT_EMAIL',
       },
       customEmail: { type: String, default: null, trim: true, lowercase: true },
+      confirmedAt: { type: Date, default: null },
     },
   },
   { timestamps: true }

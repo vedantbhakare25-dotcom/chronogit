@@ -5,6 +5,7 @@ import { useSession, signIn } from 'next-auth/react';
 import Navbar from '@/components/Navbar';
 import MonitorCard from '@/components/MonitorCard';
 import AddMonitorModal from '@/components/AddMonitorModal';
+import AlertPreferenceModal from '@/components/AlertPreferenceModal';
 import { Plus, RefreshCw, Activity, ShieldCheck, AlertTriangle, XCircle } from 'lucide-react';
 
 export default function DashboardPage() {
@@ -12,6 +13,8 @@ export default function DashboardPage() {
   const [monitors, setMonitors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [alertProfile, setAlertProfile] = useState(null);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
 
   const fetchMonitors = async () => {
     try {
@@ -35,6 +38,26 @@ export default function DashboardPage() {
       setLoading(false);
     }
   }, [status]);
+
+  useEffect(() => {
+    if (status !== 'authenticated' || !session?.user?.id) {
+      setAlertProfile(null);
+      return;
+    }
+    let cancelled = false;
+    const dismissalKey = `alert-email-onboarding-dismissed:${session.user.id}`;
+    setOnboardingDismissed(
+      typeof window !== 'undefined' && window.sessionStorage.getItem(dismissalKey) === '1'
+    );
+    fetch('/api/user/preferences')
+      .then(async (res) => {
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not load alert preferences');
+        if (!cancelled) setAlertProfile(data);
+      })
+      .catch((err) => console.error('Failed to fetch alert preferences:', err));
+    return () => { cancelled = true; };
+  }, [status, session?.user?.id]);
 
   const handleTriggerCheck = async (id) => {
     try {
@@ -64,6 +87,25 @@ export default function DashboardPage() {
 
   const handleCreated = (newMonitor) => {
     setMonitors((prev) => [newMonitor, ...prev]);
+  };
+
+  const dismissAlertOnboarding = () => {
+    setOnboardingDismissed(true);
+    if (session?.user?.id) {
+      window.sessionStorage.setItem(`alert-email-onboarding-dismissed:${session.user.id}`, '1');
+    }
+  };
+
+  const handleAlertPreferenceSaved = (result) => {
+    setAlertProfile((current) => ({
+      ...current,
+      alertEmailPreference: result.alertEmailPreference,
+      effectiveAlertEmail: result.effectiveAlertEmail,
+    }));
+    setOnboardingDismissed(false);
+    if (session?.user?.id) {
+      window.sessionStorage.removeItem(`alert-email-onboarding-dismissed:${session.user.id}`);
+    }
   };
 
   // Metrics summary
@@ -214,7 +256,16 @@ export default function DashboardPage() {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onCreated={handleCreated}
+        effectiveAlertEmail={alertProfile?.effectiveAlertEmail || ''}
       />
+      {alertProfile && !alertProfile.alertEmailPreference?.confirmedAt && !onboardingDismissed && (
+        <AlertPreferenceModal
+          accountEmail={session?.user?.email || alertProfile.email || ''}
+          preference={alertProfile.alertEmailPreference}
+          onSaved={handleAlertPreferenceSaved}
+          onDismiss={dismissAlertOnboarding}
+        />
+      )}
     </div>
   );
 }

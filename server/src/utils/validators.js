@@ -108,7 +108,19 @@ function normalizeAlerts(alerts, errors) {
       out.discordWebhookUrl = alerts.discordWebhookUrl;
     }
   }
-  if (alerts.email !== undefined) out.email = alerts.email;
+  if (alerts.email !== undefined) {
+    if (alerts.email !== null && typeof alerts.email !== 'string') {
+      errors.push('alerts.email must be a valid email string');
+    } else if (
+      typeof alerts.email === 'string' &&
+      alerts.email.trim() &&
+      !/^[^\s@]+@[^\s@]+$/.test(alerts.email.trim())
+    ) {
+      errors.push('alerts.email must be a valid email address');
+    } else {
+      out.email = alerts.email;
+    }
+  }
   if (alerts.notifyOnRecovery !== undefined) {
     if (typeof alerts.notifyOnRecovery !== 'boolean') errors.push('alerts.notifyOnRecovery must be a boolean');
     else out.notifyOnRecovery = alerts.notifyOnRecovery;
