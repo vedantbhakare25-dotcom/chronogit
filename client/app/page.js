@@ -121,8 +121,8 @@ export default function DashboardPage() {
     }
   };
 
-  const handleDelete = async (monitor) => {
-    if (!window.confirm(`Delete monitor '${monitor.name}'? This also removes its check history and notifications.`)) return;
+  const handleDeleteMonitor = async (monitor) => {
+    if (!window.confirm('Are you sure you want to delete this monitor?')) return;
 
     const id = monitor._id;
     const originalIndex = monitors.findIndex((item) => item._id === id);
@@ -146,6 +146,10 @@ export default function DashboardPage() {
         throw new Error(body.error || 'Could not delete monitor');
       }
     } catch (err) {
+      // Demo accounts are intentionally read-only on the backend. Keep the
+      // optimistic local removal so the sandbox still demonstrates the flow.
+      if (isDemoMode) return;
+
       setMonitors((prev) => {
         if (prev.some((item) => item._id === id)) return prev;
         const restored = [...prev];
@@ -337,7 +341,7 @@ export default function DashboardPage() {
                 key={m._id}
                 monitor={m}
                 onTriggerCheck={handleTriggerCheck}
-                onDelete={handleDelete}
+                onDelete={handleDeleteMonitor}
                 deleting={deletingMonitorId === m._id}
                 readOnly={isDemoMode}
               />
