@@ -13,10 +13,10 @@ export default function AddMonitorModal({ isOpen, onClose, onCreated, effectiveA
 
   if (!isOpen) return null;
 
-  const handleFillMock = (driftType = '') => {
-    setName('Demo Weather API');
-    const port = 4000;
-    setUrl(`http://localhost:${port}/api/mock/weather${driftType ? `?drift=${driftType}` : ''}`);
+  const handleFillMock = () => {
+    setName('Demo Products API');
+    // Production-safe mock endpoint jo live cloud par hamesha resolve hota hai
+    setUrl('https://dummyjson.com/products/1');
     setIntervalMinutes(5);
   };
 
@@ -70,11 +70,11 @@ export default function AddMonitorModal({ isOpen, onClose, onCreated, effectiveA
             <span className="font-semibold flex items-center gap-1">
               <Sparkles className="w-3.5 h-3.5" /> Demo Shortcut:
             </span>
-            Prefill with local Weather API
+            Prefill with public Demo API
           </div>
           <button
             type="button"
-            onClick={() => handleFillMock()}
+            onClick={handleFillMock}
             className="px-2.5 py-1 rounded text-xs bg-rose-500 text-white font-medium hover:bg-rose-600 transition"
           >
             Auto-Fill
