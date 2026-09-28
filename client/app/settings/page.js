@@ -15,9 +15,15 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  const isDemoMode = session?.user?.isDemo === true ||
+    session?.user?.email?.toLowerCase() === 'demo@chronogit.dev';
 
   useEffect(() => {
     if (status === 'unauthenticated') router.replace('/');
+    if (isDemoMode) {
+      setLoading(false);
+      return;
+    }
     if (status !== 'authenticated') return;
     fetch('/api/user/preferences')
       .then(async (res) => {
@@ -32,7 +38,7 @@ export default function SettingsPage() {
       })
       .catch((err) => setMessage(err.message))
       .finally(() => setLoading(false));
-  }, [status, router, session?.user?.email]);
+  }, [status, router, session?.user?.email, isDemoMode]);
 
   async function save(event) {
     event.preventDefault();
@@ -69,6 +75,18 @@ export default function SettingsPage() {
         <Link href="/" className="text-zinc-400 hover:text-white inline-flex items-center gap-2 mb-6 text-sm">
           ← Back to Monitors
         </Link>
+        {isDemoMode ? (
+          <section className="mt-2 rounded-xl border border-amber-500/20 bg-amber-500/5 p-5">
+            <span className="inline-flex rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[10px] font-medium text-amber-300">
+              Demo Mode (Read-Only/Sandbox)
+            </span>
+            <h1 className="mt-4 text-xl font-semibold">Sandbox settings</h1>
+            <p className="mt-2 text-sm text-neutral-400">
+              Demo accounts use shared example monitors and cannot view or change a personal account’s alert settings.
+            </p>
+          </section>
+        ) : (
+        <>
         <h1 className="text-xl font-semibold">Alert email settings</h1>
         <p className="mt-2 text-sm text-neutral-400">Google account: {accountEmail || session?.user?.email || '—'}</p>
         {loading ? <p className="mt-6 text-sm text-neutral-400">Loading preferences…</p> : (
@@ -97,6 +115,8 @@ export default function SettingsPage() {
             </button>
             {message && <p role="status" className="text-sm text-neutral-300">{message}</p>}
           </form>
+        )}
+        </>
         )}
       </main>
     </div>

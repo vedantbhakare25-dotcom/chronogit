@@ -1,8 +1,12 @@
 import { Router } from 'express';
 import User from '../models/User.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { badRequest, notFound } from '../utils/AppError.js';
+import { AppError, badRequest, notFound } from '../utils/AppError.js';
 import { requireInternalAuth } from '../middlewares/auth.js';
+import { ensureDemoMonitors } from '../services/demoSeed.js';
+
+const DEMO_GOOGLE_ID = 'demo-sandbox-user-id';
+const DEMO_EMAIL = 'demo@chronogit.dev';
 
 const router = Router();
 
@@ -20,12 +24,14 @@ router.post(
     if (!googleId || !email) {
       throw badRequest('googleId and email are required');
     }
+    const isDemo = googleId === DEMO_GOOGLE_ID && email.toLowerCase() === DEMO_EMAIL;
 
     const user = await User.findOneAndUpdate(
       { googleId },
-      { $set: { email, name: name || '', avatar: avatar || '' } },
+      { $set: { email, name: name || '', avatar: avatar || '', isDemo } },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );
+    if (isDemo) await ensureDemoMonitors(user._id);
 
     res.json({
       id: user._id,
@@ -34,6 +40,7 @@ router.post(
       avatar: user.avatar,
       alertEmailPreference: user.alertEmailPreference,
       effectiveAlertEmail: user.getEffectiveAlertEmail(),
+      isDemo: user.isDemo,
     });
   })
 );
@@ -56,6 +63,7 @@ router.get(
       avatar: user.avatar,
       alertEmailPreference: user.alertEmailPreference,
       effectiveAlertEmail: user.getEffectiveAlertEmail(),
+      isDemo: user.isDemo,
     });
   })
 );
@@ -79,6 +87,7 @@ router.put(
 
     const user = await User.findById(req.userId);
     if (!user) throw notFound('User not found');
+    if (user.isDemo) throw new AppError(403, 'The demo sandbox is read-only');
 
     user.alertEmailPreference = {
       type,

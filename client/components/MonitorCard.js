@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Play, CheckCircle2, AlertTriangle, XCircle, Clock, ArrowRight, Trash2 } from 'lucide-react';
 
-export default function MonitorCard({ monitor, onTriggerCheck, onDelete }) {
+export default function MonitorCard({ monitor, onTriggerCheck, onDelete, readOnly = false }) {
   const [checking, setChecking] = useState(false);
 
   const handleCheck = async (e) => {
@@ -72,23 +72,23 @@ export default function MonitorCard({ monitor, onTriggerCheck, onDelete }) {
       </div>
 
       <div className="flex items-center justify-between gap-2 pt-3 border-t border-neutral-800/60">
-        <button
+        {!readOnly && <button
           onClick={handleCheck}
           disabled={checking}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-neutral-800 text-neutral-200 hover:bg-neutral-700 disabled:opacity-50 transition"
         >
           <Play className={`w-3.5 h-3.5 ${checking ? 'animate-spin' : ''}`} />
           {checking ? 'Checking...' : 'Check Now'}
-        </button>
+        </button>}
 
         <div className="flex items-center gap-2">
-          <button
+          {!readOnly && <button
             onClick={() => onDelete(monitor._id)}
             className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
             title="Delete Monitor"
           >
             <Trash2 className="w-4 h-4" />
-          </button>
+          </button>}
           <Link
             href={`/monitors/${monitor._id}`}
             className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 transition"

@@ -28,6 +28,8 @@ export default function Navbar() {
   const [loadingNotifications, setLoadingNotifications] = useState(false);
   const [notificationError, setNotificationError] = useState('');
   const userId = session?.user?.id;
+  const isDemoMode = session?.user?.isDemo === true ||
+    session?.user?.email?.toLowerCase() === 'demo@chronogit.dev';
 
   const loadNotifications = useCallback(async () => {
     if (!userId) return;
@@ -118,6 +120,13 @@ export default function Navbar() {
             </span>
             <p className="hidden text-xs text-neutral-400 sm:block">API Contract Drift Engine</p>
           </div>
+          {isDemoMode && (
+            <span title="Demo Mode (Read-Only/Sandbox)"
+              className="ml-1 inline-flex rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-[9px] font-medium text-amber-300 sm:text-[10px]">
+              <span className="sm:hidden">Demo</span>
+              <span className="hidden sm:inline">Demo Mode (Read-Only/Sandbox)</span>
+            </span>
+          )}
         </Link>
 
         <div className="flex items-center gap-3">

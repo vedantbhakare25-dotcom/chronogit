@@ -15,10 +15,10 @@ export const authOptions = {
       credentials: {},
       async authorize() {
         return {
-          id: 'google_demo_101',
-          name: 'Vedant Bhakare (Demo)',
-          email: 'vedant.demo@example.com',
-          image: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Vedant',
+          id: 'demo-sandbox-user-id',
+          name: 'ChronoGit Guest',
+          email: 'demo@chronogit.dev',
+          image: null,
         };
       },
     }),
@@ -36,16 +36,21 @@ export const authOptions = {
       });
       if (!syncedUser?.id) throw new Error('User sync response did not contain a database ID');
       user.mongoId = String(syncedUser.id);
+      user.isDemo = syncedUser.isDemo === true;
       return true;
     },
     async jwt({ token, user }) {
       if (user?.mongoId) {
         token.userId = user.mongoId;
+        token.isDemo = user.isDemo === true;
       }
       return token;
     },
     async session({ session, token }) {
-      if (session.user && token?.userId) session.user.id = String(token.userId);
+      if (session.user) {
+        if (token?.userId) session.user.id = String(token.userId);
+        session.user.isDemo = token?.isDemo === true;
+      }
       return session;
     },
   },

@@ -8,7 +8,7 @@ import { fetchJson } from '../services/fetcher.js';
 import { extractSchema, diffSchemas } from '../services/schema/index.js';
 import { runCheck } from '../services/checkRunner.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
-import { badRequest, notFound } from '../utils/AppError.js';
+import { AppError, badRequest, notFound } from '../utils/AppError.js';
 import { parseCreateMonitorInput, parseUpdateMonitorInput, parsePagination } from '../utils/validators.js';
 import { requireInternalAuth } from '../middlewares/auth.js';
 
@@ -18,10 +18,21 @@ const router = Router();
 router.use(requireInternalAuth());
 
 /** Loads monitor scoped to req.userId if available, or throws 400/404 */
-async function loadMonitor(id, userId) {
-  if (!mongoose.isValidObjectId(id)) throw badRequest('Invalid monitor id');
+async function getRequestUser(userId) {
   if (!mongoose.isValidObjectId(userId)) throw badRequest('Invalid authenticated user ID');
-  const monitor = await Monitor.findOne({ _id: id, $or: [{ userId }, { userId: null }] });
+  const user = await User.findById(userId);
+  if (!user) throw notFound('User not found');
+  return user;
+}
+
+async function loadMonitor(id, userId, { writable = false } = {}) {
+  if (!mongoose.isValidObjectId(id)) throw badRequest('Invalid monitor id');
+  const user = await getRequestUser(userId);
+  if (writable && user.isDemo) throw new AppError(403, 'The demo sandbox is read-only');
+  const filter = user.isDemo
+    ? { _id: id, userId }
+    : { _id: id, $or: [{ userId }, { userId: null }] };
+  const monitor = await Monitor.findOne(filter);
   if (!monitor) throw notFound('Monitor not found');
   if (!monitor.userId) {
     const claimed = await Monitor.findOneAndUpdate(
@@ -41,14 +52,14 @@ async function loadMonitor(id, userId) {
 router.post(
   '/',
   asyncHandler(async (req, res) => {
+    const user = await getRequestUser(req.userId);
+    if (user.isDemo) throw new AppError(403, 'The demo sandbox is read-only');
     const input = parseCreateMonitorInput(req.body);
     const alerts = { ...input.alerts };
 
     // An explicit non-empty monitor recipient wins. Otherwise inherit the
     // user's saved preference so every new monitor is alert-ready by default.
     if (typeof alerts.email !== 'string' || !alerts.email.trim()) {
-      const user = await User.findById(req.userId);
-      if (!user) throw notFound('User not found');
       alerts.email = user.getEffectiveAlertEmail?.() || user.email;
     } else {
       alerts.email = alerts.email.trim();
@@ -84,15 +95,18 @@ router.post(
 router.get(
   '/',
   asyncHandler(async (req, res) => {
-    if (!mongoose.isValidObjectId(req.userId)) throw badRequest('Invalid authenticated user ID');
-    const monitors = await Monitor.find({ $or: [{ userId: req.userId }, { userId: null }] })
+    const user = await getRequestUser(req.userId);
+    const filter = user.isDemo
+      ? { userId: req.userId }
+      : { $or: [{ userId: req.userId }, { userId: null }] };
+    const monitors = await Monitor.find(filter)
       .select('_id userId name url status intervalMinutes isActive lastCheckedAt nextCheckAt createdAt')
       .sort({ createdAt: -1 })
       .lean();
 
     const scopedMonitors = [];
     for (const monitor of monitors) {
-      if (!monitor.userId) {
+      if (!user.isDemo && !monitor.userId) {
         const claimed = await Monitor.findOneAndUpdate(
           { _id: monitor._id, userId: null },
           { $set: { userId: req.userId } },
@@ -135,7 +149,7 @@ router.get(
 router.put(
   '/:id',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id, req.userId);
+    const monitor = await loadMonitor(req.params.id, req.userId, { writable: true });
     const update = parseUpdateMonitorInput(req.body);
 
     Object.assign(monitor, update);
@@ -154,7 +168,7 @@ router.put(
 router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id, req.userId);
+    const monitor = await loadMonitor(req.params.id, req.userId, { writable: true });
     await Promise.all([CheckLog.deleteMany({ monitorId: monitor._id }), monitor.deleteOne()]);
     res.status(204).send();
   })
@@ -164,7 +178,7 @@ router.delete(
 router.post(
   '/:id/check',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id, req.userId);
+    const monitor = await loadMonitor(req.params.id, req.userId, { writable: true });
     const { checkLog, outcome } = await runCheck(monitor);
     res.json({
       monitor: {
@@ -183,7 +197,7 @@ router.post(
 router.post(
   '/:id/accept',
   asyncHandler(async (req, res) => {
-    const monitor = await loadMonitor(req.params.id, req.userId);
+    const monitor = await loadMonitor(req.params.id, req.userId, { writable: true });
     const pending = diffSchemas(monitor.baselineSchema, monitor.latestSchema, {
       ignorePaths: monitor.ignorePaths,
     });

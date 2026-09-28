@@ -13,6 +13,8 @@ const dashboardCache = new Map();
 
 export default function DashboardPage() {
   const { data: session, status } = useSession();
+  const isDemoMode = session?.user?.isDemo === true ||
+    session?.user?.email?.toLowerCase() === 'demo@chronogit.dev';
   const [monitors, setMonitors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -245,12 +247,12 @@ export default function DashboardPage() {
             >
               <RefreshCw className="w-4 h-4" />
             </button>
-            <button
+            {!isDemoMode && <button
               onClick={() => setIsModalOpen(true)}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-rose-500 hover:bg-rose-600 text-white text-xs font-semibold shadow-lg shadow-rose-500/20 transition"
             >
               <Plus className="w-4 h-4" /> Add Monitor
-            </button>
+            </button>}
           </div>
         </div>
 
@@ -291,14 +293,16 @@ export default function DashboardPage() {
             </div>
             <h3 className="text-sm font-semibold text-white">No endpoints registered yet</h3>
             <p className="text-xs text-neutral-400 mt-1 max-w-sm mx-auto">
-              Add your first API endpoint to record a baseline schema and start automated background checks.
+              {isDemoMode
+                ? 'Sandbox examples will appear here when the demo workspace is initialized.'
+                : 'Add your first API endpoint to record a baseline schema and start automated background checks.'}
             </p>
-            <button
+            {!isDemoMode && <button
               onClick={() => setIsModalOpen(true)}
               className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-100 text-neutral-900 text-xs font-semibold hover:bg-white transition"
             >
               <Plus className="w-3.5 h-3.5" /> Register Endpoint
-            </button>
+            </button>}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -308,19 +312,20 @@ export default function DashboardPage() {
                 monitor={m}
                 onTriggerCheck={handleTriggerCheck}
                 onDelete={handleDelete}
+                readOnly={isDemoMode}
               />
             ))}
           </div>
         )}
       </main>
 
-      <AddMonitorModal
+      {!isDemoMode && <AddMonitorModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         onCreated={handleCreated}
         effectiveAlertEmail={alertProfile?.effectiveAlertEmail || ''}
-      />
-      {alertProfile && !alertProfile.alertEmailPreference?.confirmedAt && !onboardingDismissed && (
+      />}
+      {!isDemoMode && alertProfile && !alertProfile.alertEmailPreference?.confirmedAt && !onboardingDismissed && (
         <AlertPreferenceModal
           accountEmail={session?.user?.email || alertProfile.email || ''}
           preference={alertProfile.alertEmailPreference}

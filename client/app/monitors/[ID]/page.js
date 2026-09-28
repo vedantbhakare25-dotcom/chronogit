@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'next/navigation';
+import { useSession } from 'next-auth/react';
 import Navbar from '@/components/Navbar';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
 import { ArrowLeft, Play, Check, RefreshCw } from 'lucide-react';
@@ -9,6 +10,9 @@ import Link from 'next/link';
 
 export default function MonitorDetailPage() {
   const { ID: id } = useParams();
+  const { data: session } = useSession();
+  const isDemoMode = session?.user?.isDemo === true ||
+    session?.user?.email?.toLowerCase() === 'demo@chronogit.dev';
 
   const [monitor, setMonitor] = useState(null);
   const [logs, setLogs] = useState([]);
@@ -124,7 +128,7 @@ export default function MonitorDetailPage() {
             <ArrowLeft className="w-3.5 h-3.5" /> Back to Monitors
           </Link>
 
-          <div className="flex items-center gap-2.5">
+          {!isDemoMode && <div className="flex items-center gap-2.5">
             <button
               onClick={handleCheckNow}
               disabled={actionLoading}
@@ -142,7 +146,7 @@ export default function MonitorDetailPage() {
                 <Check className="w-3.5 h-3.5" /> Accept as New Baseline
               </button>
             )}
-          </div>
+          </div>}
         </div>
 
         {/* Monitor Header Box */}
