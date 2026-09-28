@@ -56,6 +56,7 @@ const MonitorSchema = new Schema(
 
     lastBreakingFingerprint: { type: String, default: null },
     lastNonBreakingFingerprint: { type: String, default: null },
+    dismissedDriftFingerprint: { type: String, default: null },
 
     lastCheckedAt: { type: Date, default: null },
     nextCheckAt: { type: Date, default: null, index: true },

@@ -4,6 +4,7 @@ import mongoose from 'mongoose';
 import Monitor from '../models/Monitor.js';
 import User from '../models/User.js';
 import CheckLog from '../models/CheckLog.js';
+import Notification from '../models/Notification.js';
 import { fetchJson } from '../services/fetcher.js';
 import { extractSchema, diffSchemas } from '../services/schema/index.js';
 import { runCheck } from '../services/checkRunner.js';
@@ -11,6 +12,7 @@ import { asyncHandler } from '../utils/asyncHandler.js';
 import { AppError, badRequest, notFound } from '../utils/AppError.js';
 import { parseCreateMonitorInput, parseUpdateMonitorInput, parsePagination } from '../utils/validators.js';
 import { requireInternalAuth } from '../middlewares/auth.js';
+import { computeDriftFingerprint, getVisiblePendingChanges } from '../services/driftState.js';
 
 const router = Router();
 
@@ -138,9 +140,7 @@ router.get(
     const monitor = await loadMonitor(req.params.id, req.userId);
     res.json({
       ...monitor.toClientJSON(),
-      pendingChanges: diffSchemas(monitor.baselineSchema, monitor.latestSchema, {
-        ignorePaths: monitor.ignorePaths,
-      }),
+      pendingChanges: getVisiblePendingChanges(monitor),
     });
   })
 );
@@ -183,13 +183,41 @@ router.post(
     res.json({
       monitor: {
         ...monitor.toClientJSON(),
-        pendingChanges: diffSchemas(monitor.baselineSchema, monitor.latestSchema, {
-          ignorePaths: monitor.ignorePaths,
-        }),
+        pendingChanges: getVisiblePendingChanges(monitor),
       },
       checkLog,
       outcome,
     });
+  })
+);
+
+/** POST /api/monitors/:id/dismiss-drift */
+router.post(
+  '/:id/dismiss-drift',
+  asyncHandler(async (req, res) => {
+    const monitor = await loadMonitor(req.params.id, req.userId, { writable: true });
+    const changes = diffSchemas(monitor.baselineSchema, monitor.latestSchema, {
+      ignorePaths: monitor.ignorePaths,
+    });
+
+    // Suppress this exact observed diff without accepting it as the baseline.
+    monitor.dismissedDriftFingerprint = computeDriftFingerprint(changes);
+    monitor.lastBreakingFingerprint = null;
+    monitor.lastNonBreakingFingerprint = null;
+    monitor.status = 'HEALTHY';
+    await monitor.save();
+
+    await Notification.updateMany(
+      {
+        monitorId: monitor._id,
+        userId: req.userId,
+        type: 'BREAKING_DRIFT',
+        isRead: false,
+      },
+      { $set: { isRead: true } }
+    );
+
+    res.json({ ...monitor.toClientJSON(), pendingChanges: [] });
   })
 );
 
@@ -207,6 +235,8 @@ router.post(
 
     monitor.baselineSchema = monitor.latestSchema;
     monitor.lastBreakingFingerprint = null;
+    monitor.lastNonBreakingFingerprint = null;
+    monitor.dismissedDriftFingerprint = null;
     monitor.status = 'HEALTHY';
     await monitor.save();
 

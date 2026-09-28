@@ -6,6 +6,7 @@ import { fetchJson } from './fetcher.js';
 import { extractSchema, diffSchemas, hasBreakingChanges } from './schema/index.js';
 import { ALERT_KIND, decideAlertKind, toCheckLogAlertSent, dispatchAlert } from './alerts/index.js';
 import { persistInAppNotification } from './notificationService.js';
+import { computeDriftFingerprint } from './driftState.js';
 
 export function computeBreakingFingerprint(changes) {
   const breaking = changes
@@ -101,13 +102,18 @@ export async function runCheck(monitor) {
   const shouldNotifyNonBreaking =
     outcome === 'NON_BREAKING' && nonBreakingFingerprint !== (monitor.lastNonBreakingFingerprint ?? null);
 
-  const alertKind = decideAlertKind({
+  let alertKind = decideAlertKind({
     previousStatus,
     previousFingerprint,
     newStatus: breaking ? 'BREAKING' : 'HEALTHY',
     newFingerprint,
     notifyOnRecovery: monitor.alerts?.notifyOnRecovery !== false,
   });
+  const driftFingerprint = computeDriftFingerprint(changes);
+  const isDismissedDrift = Boolean(
+    driftFingerprint && driftFingerprint === monitor.dismissedDriftFingerprint
+  );
+  if (isDismissedDrift) alertKind = null;
 
   const checkLog = await CheckLog.create({
     monitorId: monitor._id,
@@ -120,9 +126,14 @@ export async function runCheck(monitor) {
   });
 
   monitor.latestSchema = latestSchema;
-  monitor.status = breaking ? 'BREAKING' : 'HEALTHY';
-  monitor.lastBreakingFingerprint = newFingerprint;
-  monitor.lastNonBreakingFingerprint = outcome === 'NON_BREAKING' ? nonBreakingFingerprint : null;
+  monitor.status = breaking && !isDismissedDrift ? 'BREAKING' : 'HEALTHY';
+  monitor.lastBreakingFingerprint = isDismissedDrift ? null : newFingerprint;
+  monitor.lastNonBreakingFingerprint = isDismissedDrift
+    ? null
+    : outcome === 'NON_BREAKING' ? nonBreakingFingerprint : null;
+  if (driftFingerprint !== monitor.dismissedDriftFingerprint) {
+    monitor.dismissedDriftFingerprint = null;
+  }
   monitor.lastCheckedAt = now;
   monitor.nextCheckAt = nextCheckAt;
   await monitor.save();
@@ -135,7 +146,7 @@ export async function runCheck(monitor) {
       message: `${changes.length} schema change${changes.length === 1 ? '' : 's'} detected.`,
       diffSummary: changes,
     });
-  } else if (shouldNotifyNonBreaking) {
+  } else if (!isDismissedDrift && shouldNotifyNonBreaking) {
     await persistInAppNotification({
       monitor,
       type: 'NON_BREAKING_DRIFT',

@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import { useSession } from 'next-auth/react';
 import Navbar from '@/components/Navbar';
 import ReactDiffViewer, { DiffMethod } from 'react-diff-viewer-continued';
-import { ArrowLeft, Play, Check, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Play, Check, RefreshCw, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 
 export default function MonitorDetailPage() {
@@ -20,6 +20,7 @@ export default function MonitorDetailPage() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
 
   const fetchData = useCallback(async () => {
     try {
@@ -85,6 +86,24 @@ export default function MonitorDetailPage() {
     }
   };
 
+  const handleDismissDrift = async () => {
+    setActionLoading(true);
+    setError('');
+    setSuccessMessage('');
+    try {
+      const res = await fetch(`/api/monitors/${id}/dismiss`, { method: 'POST' });
+      const updated = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(updated.error || 'Could not discard drift');
+      setMonitor(updated);
+      setChanges(updated.pendingChanges || []);
+      setSuccessMessage('Drift discarded. Monitor returned to HEALTHY state.');
+    } catch (err) {
+      setError(err.message || 'Could not discard drift');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   // Render only the server's canonical diffSchemas output, including ignored
   // paths and ancestor collapsing exactly as the check engine applies them.
   const baselineStr = changes.map((change) =>
@@ -119,6 +138,7 @@ export default function MonitorDetailPage() {
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-8 space-y-6">
         {error && <p role="alert" className="rounded-lg border border-rose-900 bg-rose-950/40 px-3 py-2 text-sm text-rose-300">{error}</p>}
+        {successMessage && <p role="status" className="rounded-lg border border-emerald-900 bg-emerald-950/40 px-3 py-2 text-sm text-emerald-300">{successMessage}</p>}
         {/* Navigation Bar */}
         <div className="flex items-center justify-between">
           <Link
@@ -144,6 +164,18 @@ export default function MonitorDetailPage() {
                 className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs font-semibold text-white shadow-lg shadow-emerald-600/20 transition disabled:opacity-50"
               >
                 <Check className="w-3.5 h-3.5" /> Accept as New Baseline
+              </button>
+            )}
+            {(hasDiff || monitor.status === 'BREAKING' || monitor.status === 'NON_BREAKING') && (
+              <button
+                onClick={handleDismissDrift}
+                disabled={actionLoading}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-neutral-700 bg-transparent hover:bg-neutral-800 text-xs font-medium text-neutral-300 transition disabled:opacity-50"
+              >
+                {actionLoading
+                  ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  : <Trash2 className="w-3.5 h-3.5" />}
+                Discard Drift
               </button>
             )}
           </div>}
