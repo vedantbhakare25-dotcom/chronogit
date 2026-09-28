@@ -169,7 +169,13 @@ router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
     const monitor = await loadMonitor(req.params.id, req.userId, { writable: true });
-    await Promise.all([CheckLog.deleteMany({ monitorId: monitor._id }), monitor.deleteOne()]);
+    // Baseline/latest schemas are embedded in the monitor document and are
+    // removed with it. Clean up telemetry and only this owner's notifications.
+    await Promise.all([
+      CheckLog.deleteMany({ monitorId: monitor._id }),
+      Notification.deleteMany({ monitorId: monitor._id, userId: req.userId }),
+      monitor.deleteOne(),
+    ]);
     res.status(204).send();
   })
 );

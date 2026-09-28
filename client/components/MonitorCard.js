@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { Play, CheckCircle2, AlertTriangle, XCircle, Clock, ArrowRight, Trash2 } from 'lucide-react';
 
-export default function MonitorCard({ monitor, onTriggerCheck, onDelete, readOnly = false }) {
+export default function MonitorCard({ monitor, onTriggerCheck, onDelete, readOnly = false, deleting = false }) {
   const [checking, setChecking] = useState(false);
 
   const handleCheck = async (e) => {
@@ -83,11 +83,15 @@ export default function MonitorCard({ monitor, onTriggerCheck, onDelete, readOnl
 
         <div className="flex items-center gap-2">
           {!readOnly && <button
-            onClick={() => onDelete(monitor._id)}
-            className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+            onClick={() => onDelete(monitor)}
+            disabled={deleting}
+            className="p-2 text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition disabled:opacity-50"
             title="Delete Monitor"
+            aria-label={`Delete monitor ${monitor.name}`}
           >
-            <Trash2 className="w-4 h-4" />
+            {deleting
+              ? <span className="block w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              : <Trash2 className="w-4 h-4" />}
           </button>}
           <Link
             href={`/monitors/${monitor._id}`}

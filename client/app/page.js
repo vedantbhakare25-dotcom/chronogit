@@ -20,6 +20,8 @@ export default function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [alertProfile, setAlertProfile] = useState(null);
   const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [deletingMonitorId, setDeletingMonitorId] = useState(null);
+  const [dashboardError, setDashboardError] = useState('');
 
   const fetchMonitors = async () => {
     try {
@@ -119,24 +121,47 @@ export default function DashboardPage() {
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Are you sure you want to delete this monitor?')) return;
+  const handleDelete = async (monitor) => {
+    if (!window.confirm(`Delete monitor '${monitor.name}'? This also removes its check history and notifications.`)) return;
+
+    const id = monitor._id;
+    const originalIndex = monitors.findIndex((item) => item._id === id);
+    setDashboardError('');
+    setDeletingMonitorId(id);
+    setMonitors((prev) => prev.filter((item) => item._id !== id));
+    const userId = session?.user?.id;
+    const cached = userId ? dashboardCache.get(userId) : null;
+    if (cached) {
+      dashboardCache.set(userId, {
+        ...cached,
+        monitors: cached.monitors.filter((item) => item._id !== id),
+        updatedAt: Date.now(),
+      });
+    }
+
     try {
       const res = await fetch(`/api/monitors/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setMonitors((prev) => prev.filter((m) => m._id !== id));
-        const userId = session?.user?.id;
-        if (userId) {
-          const cached = dashboardCache.get(userId);
-          if (cached) dashboardCache.set(userId, {
-            ...cached,
-            monitors: cached.monitors.filter((monitor) => monitor._id !== id),
-            updatedAt: Date.now(),
-          });
-        }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || 'Could not delete monitor');
       }
     } catch (err) {
-      console.error('Delete failed:', err);
+      setMonitors((prev) => {
+        if (prev.some((item) => item._id === id)) return prev;
+        const restored = [...prev];
+        restored.splice(Math.min(Math.max(originalIndex, 0), restored.length), 0, monitor);
+        return restored;
+      });
+      if (cached && userId) {
+        dashboardCache.set(userId, {
+          ...cached,
+          monitors: [...cached.monitors.slice(0, Math.max(originalIndex, 0)), monitor, ...cached.monitors.slice(Math.max(originalIndex, 0))],
+          updatedAt: Date.now(),
+        });
+      }
+      setDashboardError(err.message || 'Could not delete monitor');
+    } finally {
+      setDeletingMonitorId(null);
     }
   };
 
@@ -231,6 +256,7 @@ export default function DashboardPage() {
       <Navbar />
 
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 py-8 space-y-8">
+        {dashboardError && <p role="alert" className="rounded-lg border border-rose-900 bg-rose-950/40 px-3 py-2 text-sm text-rose-300">{dashboardError}</p>}
         {/* Top Header & Actions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
@@ -312,6 +338,7 @@ export default function DashboardPage() {
                 monitor={m}
                 onTriggerCheck={handleTriggerCheck}
                 onDelete={handleDelete}
+                deleting={deletingMonitorId === m._id}
                 readOnly={isDemoMode}
               />
             ))}
