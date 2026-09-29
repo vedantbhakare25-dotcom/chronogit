@@ -1,4 +1,7 @@
 import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
+
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
 // Built lazily (not at import time) so tests can set env vars first, and
 // cached as a Promise so concurrent calls before it resolves all share the
@@ -63,6 +66,31 @@ export async function sendAlertEmail({ to, subject, html, text }) {
   if (!to) {
     console.warn('[email] no recipient configured on this monitor (monitor.alerts.email) — skipping alert');
     return { sent: false, reason: 'NO_RECIPIENT' };
+  }
+
+  // Resend uses HTTPS, avoiding SMTP egress restrictions common on free hosts.
+  // If configured, do not fall back to SMTP on send failure: that could send
+  // the same alert twice if Resend accepted it but the response was lost.
+  if (resend) {
+    try {
+      const response = await resend.emails.send({
+        from: 'ChronoGit Alerts <onboarding@resend.dev>',
+        to,
+        subject,
+        html,
+        text,
+      });
+
+      if (response?.error) {
+        throw new Error(response.error.message || 'Resend API rejected the email');
+      }
+
+      console.log('[email] Alert successfully sent via Resend API:', response);
+      return { sent: true };
+    } catch (err) {
+      console.error('[email] failed to send alert email via Resend API:', err.message);
+      return { sent: false, reason: 'SEND_FAILED', error: err.message };
+    }
   }
 
   const setup = await getTransporter();
